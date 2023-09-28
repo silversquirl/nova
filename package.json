@@ -1,0 +1,7 @@
+{
+  "name": "@squirl/nova",
+  "bin": "./index.ts",
+  "devDependencies": {
+    "bun-types": "latest"
+  }
+}
