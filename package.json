@@ -1,6 +1,7 @@
 {
   "name": "@squirl/nova",
-  "bin": "./build/index.js",
+  "version": "0.1.0",
+  "bin": { "nova": "build/index.js" },
   "files": ["build/*"],
   "scripts": {
     "prepack": "bun build --outdir=build --target=bun --minify index.ts"
