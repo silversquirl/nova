@@ -38,7 +38,7 @@ class HtmlProcessor implements HTMLRewriterTypes.HTMLRewriterElementContentHandl
   }
 }
 
-const serve = {
+const handlers = {
   async html(req: Request, file: BunFile, server: Server): Promise<Response> {
     if (file.name === undefined) {
       throw new Error("empty file name");
@@ -101,50 +101,57 @@ const serve = {
   },
 };
 
-const handlers: Map<string, HandlerFn> = new Map([
-  ["text/html", serve.html],
-  ["text/javascript", serve.bundle],
+const handlerMap: Map<string, HandlerFn> = new Map([
+  ["text/html", handlers.html],
+  ["text/javascript", handlers.bundle],
 ]);
 
-console.log("Starting server...");
-Bun.serve({
-  fetch(req: Request, server: Server): Response | Promise<Response> | undefined {
-    const path = pathJoin(".", new URL(req.url).pathname);
+type SocketData = { path: string };
 
-    if (server.upgrade(req, { data: { path } })) {
-      return;
-    }
+export type ServeOptions = {
+  port?: number;
+};
 
-    const file = Bun.file(path);
-    const handler = handlers.get(file.type.split(";", 1)[0]) ?? serve.file;
-    const res = handler(req, file, server);
-    return res;
-  },
+export function serve(opts: ServeOptions = {}): void {
+  Bun.serve({
+    port: opts.port ?? 3000,
 
-  websocket: {
-    open(ws: ServerWebSocket<SocketData>) {
-      ws.subscribe(ws.data.path);
-    },
-    close(ws: ServerWebSocket<SocketData>) {
-      ws.unsubscribe(ws.data.path);
-    },
+    fetch(req: Request, server: Server): Response | Promise<Response> | undefined {
+      const path = pathJoin(".", new URL(req.url).pathname);
 
-    message(ws, msg) {
-      if (typeof msg !== "string") {
-        throw new Error("Invalid message");
+      if (server.upgrade(req, { data: { path } })) {
+        return;
       }
-      const channels = JSON.parse(msg);
-      if (!(channels instanceof Array)) {
-        throw new Error("Invalid message");
-      }
-      for (const channel of channels) {
-        if (typeof channel !== "string") {
+
+      const file = Bun.file(path);
+      const handler = handlerMap.get(file.type.split(";", 1)[0]) ?? handlers.file;
+      const res = handler(req, file, server);
+      return res;
+    },
+
+    websocket: {
+      open(ws: ServerWebSocket<SocketData>) {
+        ws.subscribe(ws.data.path);
+      },
+      close(ws: ServerWebSocket<SocketData>) {
+        ws.unsubscribe(ws.data.path);
+      },
+
+      message(ws, msg) {
+        if (typeof msg !== "string") {
           throw new Error("Invalid message");
         }
-        ws.subscribe(channel);
-      }
+        const channels = JSON.parse(msg);
+        if (!(channels instanceof Array)) {
+          throw new Error("Invalid message");
+        }
+        for (const channel of channels) {
+          if (typeof channel !== "string") {
+            throw new Error("Invalid message");
+          }
+          ws.subscribe(channel);
+        }
+      },
     },
-  },
-});
-
-type SocketData = { path: string };
+  });
+}

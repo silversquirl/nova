@@ -1,12 +1,16 @@
 {
   "name": "@squirl/nova",
   "version": "0.1.0",
-  "bin": { "nova": "build/index.js" },
+  "devDependencies": {
+    "bun-types": "latest"
+  },
+  "exports": { ".": "./build/index.js" },
+  "bin": { "nova": "build/cli.js" },
   "files": ["build/*"],
   "scripts": {
     "prepack": "bun build --outdir=build --target=bun --minify index.ts"
   },
-  "devDependencies": {
-    "bun-types": "latest"
+  "dependencies": {
+    "cleye": "^1.3.2"
   }
 }
