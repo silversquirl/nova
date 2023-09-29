@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 // TODO: use timestamps to avoid double-saves confusing the synchronization
 
-import { hmr } from "./build-hmr" with { type: "macro" };
+import { hmr } from "./build-hmr" assert { type: "macro" };
 import { FSWatcher, watch as fsWatch } from "fs";
+import { stat } from "fs/promises";
 import { Server, BunFile, ServerWebSocket, file } from "bun";
 import { extname, join as pathJoin } from "path";
 
@@ -116,8 +117,11 @@ export function serve(opts: ServeOptions = {}): void {
   Bun.serve({
     port: opts.port ?? 3000,
 
-    fetch(req: Request, server: Server): Response | Promise<Response> | undefined {
-      const path = pathJoin(".", new URL(req.url).pathname);
+    async fetch(req: Request, server: Server): Promise<Response | undefined> {
+      let path = pathJoin(".", new URL(req.url).pathname);
+      if ((await stat(path)).isDirectory()) {
+        path = pathJoin(path, "index.html");
+      }
 
       if (server.upgrade(req, { data: { path } })) {
         return;
@@ -127,6 +131,19 @@ export function serve(opts: ServeOptions = {}): void {
       const handler = handlerMap.get(file.type.split(";", 1)[0]) ?? handlers.file;
       const res = handler(req, file, server);
       return res;
+    },
+
+    error(err: Error): Response {
+      if ("code" in err) {
+        switch (err.code) {
+          case "ENOENT":
+            return new Response("404 Not Found", {
+              status: 404,
+              statusText: "Not Found",
+            });
+        }
+      }
+      throw err;
     },
 
     websocket: {
