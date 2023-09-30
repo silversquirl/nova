@@ -117,16 +117,16 @@ function checkUnknown(parsed: {
 
 function keyValue(sep: string): (s: string, ctx: z.RefinementCtx) => [string, string] {
   return (s, ctx) => {
-    const kv = s.split(sep, 1);
-    if (kv.length !== 2) {
+    const sepIdx = s.indexOf(sep);
+    if (sepIdx < 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Must follow format 'key=value'",
+        message: `Must follow format 'key${sep}value', got '${s}'`,
       });
       return z.NEVER;
     }
-    const value = JSON.parse(kv[1]);
-    return [kv[0], value];
+    const value = s.slice(sepIdx + 1);
+    return [s.slice(0, sepIdx), value];
   };
 }
 
