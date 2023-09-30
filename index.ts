@@ -1,4 +1,3 @@
-#!/usr/bin/env bun
 // TODO: use timestamps to avoid double-saves confusing the synchronization
 
 import { hmr } from "./build-hmr" assert { type: "macro" };

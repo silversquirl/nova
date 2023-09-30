@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 import { version } from "./package.json";
 import { ServeOptions, serve } from ".";
 import { cli } from "cleye";
