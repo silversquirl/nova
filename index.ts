@@ -4,15 +4,21 @@
 import { hmr } from "./build-hmr" assert { type: "macro" };
 import { FSWatcher, watch as fsWatch } from "fs";
 import { stat } from "fs/promises";
-import { Server, BunFile, ServerWebSocket, file } from "bun";
+import { Server, BunFile, ServerWebSocket, file, BuildConfig } from "bun";
 import { extname, join as pathJoin } from "path";
+import z from "zod";
 
-type HandlerFn = (req: Request, file: BunFile, server: Server) => Response | Promise<Response>;
+type HandlerFn = (
+  req: Request,
+  file: BunFile,
+  server: Server,
+  opts: ServeOptions,
+) => Response | Promise<Response>;
 
 function watch(server: Server, topic: string, path: string) {
   if (!watchers.has(path)) {
     const w = fsWatch(path, { persistent: false }, (event, filename) => {
-      console.log(topic, event, filename);
+      server.publish(topic, JSON.stringify({ event, filename }));
     });
     watchers.set(path, w);
   }
@@ -62,7 +68,7 @@ const handlers = {
     });
   },
 
-  async bundle(req: Request, file: BunFile, server: Server): Promise<Response> {
+  async bundle(req: Request, file: BunFile, server: Server, opts: ServeOptions): Promise<Response> {
     if (file.name === undefined) {
       throw new Error("empty file name");
     }
@@ -70,7 +76,10 @@ const handlers = {
 
     // TODO: dependency tracking
     const result = await Bun.build({
+      ...opts,
       entrypoints: [file.name],
+      outdir: undefined,
+      target: "browser",
     });
     if (result.success) {
       return new Response(result.outputs[0], {
@@ -111,9 +120,19 @@ type SocketData = { path: string };
 
 export type ServeOptions = {
   port?: number;
-};
+} & Omit<BuildConfig, "entrypoints" | "outdir" | "target">;
 
 export function serve(opts: ServeOptions = {}): void {
+  if (opts.splitting) {
+    throw new Error("TODO: support code splitting");
+  }
+  if (opts.sourcemap === "external") {
+    throw new Error("TODO: support external sourcemaps");
+  }
+  if (opts.naming !== undefined) {
+    throw new Error("TODO: support custom naming");
+  }
+
   Bun.serve({
     port: opts.port ?? 3000,
 
@@ -129,7 +148,7 @@ export function serve(opts: ServeOptions = {}): void {
 
       const file = Bun.file(path);
       const handler = handlerMap.get(file.type.split(";", 1)[0]) ?? handlers.file;
-      const res = handler(req, file, server);
+      const res = handler(req, file, server, opts);
       return res;
     },
 
@@ -158,10 +177,8 @@ export function serve(opts: ServeOptions = {}): void {
         if (typeof msg !== "string") {
           throw new Error("Invalid message");
         }
-        const channels = JSON.parse(msg);
-        if (!(channels instanceof Array)) {
-          throw new Error("Invalid message");
-        }
+        const msgJson = JSON.parse(msg);
+        const channels = z.string().array().parse(msgJson);
         for (const channel of channels) {
           if (typeof channel !== "string") {
             throw new Error("Invalid message");

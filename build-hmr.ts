@@ -2,7 +2,7 @@ import path from "path";
 
 export async function hmr(): Promise<string> {
   const result = await Bun.build({
-    entrypoints: [path.join(__dirname, "hmr.ts")],
+    entrypoints: [path.join(import.meta.dir, "hmr.js")],
     target: "browser",
     minify: true,
   });
