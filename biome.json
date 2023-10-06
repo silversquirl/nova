@@ -1,4 +1,7 @@
 {
+  "files": {
+    "ignore": ["build/*"]
+  },
   "formatter": {
     "indentStyle": "space",
     "enabled": true,

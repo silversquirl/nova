@@ -1,22 +1,20 @@
 // TODO: use timestamps to avoid double-saves confusing the synchronization
 
-import { buildHmr } from "./build-hmr" assert { type: "macro" };
 import { FSWatcher, watch as fsWatch } from "fs";
-import { stat } from "fs/promises";
+import { join as pathJoin } from "path";
 import {
-  Server,
-  BunFile,
-  ServerWebSocket,
-  file,
   BuildConfig,
+  BunFile,
   BunPlugin,
-  PluginBuilder,
   OnLoadResult,
-  OnLoadResultObject,
-  OnLoadResultSourceCode,
+  PluginBuilder,
+  PluginConstraints,
+  Server,
+  ServerWebSocket,
 } from "bun";
-import { extname, join as pathJoin } from "path";
+import { stat } from "fs/promises";
 import z from "zod";
+import { buildHmr } from "./build-hmr" assert { type: "macro" };
 
 const hmr = buildHmr();
 
@@ -115,6 +113,8 @@ const handlers = {
           if (namespace === "file") {
             deps.add(path);
           }
+          // FIXME: https://github.com/oven-sh/bun/pull/6346
+          return undefined as unknown as OnLoadResult;
         });
       },
     };
@@ -153,8 +153,6 @@ const handlers = {
       const printErrors = `for(let e of${JSON.stringify(errors)}){console.error(e)}`;
 
       return new Response([hmrCall, printErrors], {
-        // status: 500,
-        // statusText: "Internal Server Error",
         headers: {
           "Content-Type": "application/javascript;charset=utf-8",
         },
