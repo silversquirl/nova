@@ -1,11 +1,24 @@
 // TODO: use timestamps to avoid double-saves confusing the synchronization
 
-import { hmr } from "./build-hmr" assert { type: "macro" };
+import { buildHmr } from "./build-hmr" assert { type: "macro" };
 import { FSWatcher, watch as fsWatch } from "fs";
 import { stat } from "fs/promises";
-import { Server, BunFile, ServerWebSocket, file, BuildConfig } from "bun";
+import {
+  Server,
+  BunFile,
+  ServerWebSocket,
+  file,
+  BuildConfig,
+  BunPlugin,
+  PluginBuilder,
+  OnLoadResult,
+  OnLoadResultObject,
+  OnLoadResultSourceCode,
+} from "bun";
 import { extname, join as pathJoin } from "path";
 import z from "zod";
+
+const hmr = buildHmr();
 
 type HandlerFn = (
   req: Request,
@@ -24,8 +37,18 @@ function watch(server: Server, topic: string, path: string) {
 }
 const watchers: Map<string, FSWatcher> = new Map();
 
-class HtmlProcessor implements HTMLRewriterTypes.HTMLRewriterElementContentHandlers {
-  readonly deps: string[] = [];
+class HtmlHmrInjector implements HTMLRewriterTypes.HTMLRewriterElementContentHandlers {
+  done = false;
+
+  element(element: HTMLRewriterTypes.Element): void {
+    if (this.done) return;
+    this.done = true;
+    element.before(`<script>${hmr}</script>`, { html: true });
+  }
+}
+
+class HtmlDepTracker implements HTMLRewriterTypes.HTMLRewriterElementContentHandlers {
+  readonly deps = new Set<string>();
 
   element(element: HTMLRewriterTypes.Element): void {
     try {
@@ -33,7 +56,7 @@ class HtmlProcessor implements HTMLRewriterTypes.HTMLRewriterElementContentHandl
         if (k === "src" || k === "srcset") {
           // TODO: match fully qualified URLs to the local server too
           if (v.match(/^\/\/|https?:\/\//) === null) {
-            this.deps.push(pathJoin(".", v));
+            this.deps.add(pathJoin(".", v));
           }
         }
       }
@@ -51,16 +74,28 @@ const handlers = {
     }
     watch(server, file.name, file.name);
 
-    const handler = new HtmlProcessor();
-    // TODO: match host in selector rather than parsing in handler
-    const rewriter = new HTMLRewriter().on(
-      "script[src], img[src], source[src], source[srcset]",
-      handler,
-    );
+    const depTracker = new HtmlDepTracker();
+    const injector = new HtmlHmrInjector();
+    const rewriter = new HTMLRewriter()
+      .on(
+        // Don't need to handle scripts here; they'll add hmr subscriptions for themselves
+        // TODO: match host in selector rather than parsing in handler
+        "img[src], source[src], source[srcset]",
+        depTracker,
+      )
+      .on("script", injector);
     const res = await rewriter.transform(new Response(file)).text();
-    const deps = JSON.stringify(handler.deps);
 
-    return new Response([res, `<script>${hmr()}__hmr(${deps});</script>`], {
+    let endScript = "";
+    if (!injector.done) {
+      endScript += hmr;
+    }
+    if (depTracker.deps.size > 0) {
+      // TODO: inject deps earlier so we don't wait for the full page load
+      endScript += `__hmr(${setToJson(depTracker.deps)});`;
+    }
+
+    return new Response(endScript === "" ? res : [res, `<script>${endScript}</script>`], {
       headers: {
         "Content-Type": file.type,
       },
@@ -71,31 +106,57 @@ const handlers = {
     if (file.name === undefined) {
       throw new Error("empty file name");
     }
-    watch(server, file.name, file.name);
 
-    // TODO: dependency tracking
+    const deps = new Set<string>();
+    const plugin: BunPlugin = {
+      name: "nova dependency tracker",
+      setup(build: PluginBuilder) {
+        build.onLoad({ filter: /^/ }, ({ namespace, path }) => {
+          if (namespace === "file") {
+            deps.add(path);
+          }
+        });
+      },
+    };
+
     const result = await Bun.build({
       ...opts,
+      plugins: [plugin, ...(opts.plugins ?? [])],
       entrypoints: [file.name],
       outdir: undefined,
       target: "browser",
     });
+
+    for (const dep of deps) {
+      watch(server, dep, dep);
+    }
+
+    const hmrCall = `__hmr(${setToJson(deps)});\n`;
+
     if (result.success) {
-      return new Response(result.outputs[0], {
+      return new Response([hmrCall, result.outputs[0]], {
         headers: {
           "Content-Type": file.type,
         },
       });
     } else {
-      let response = "Bundling failed:\n";
+      console.error(`[${file.name}] build failed:`);
+      const errors = [];
       for (const log of result.logs) {
-        response += ` - ${log}\n`;
+        let msg = `${log.message}`;
+        if (log.position !== null) {
+          msg += `\n    at ${log.position.file}:${log.position.line}:${log.position.column}`;
+        }
+        console.error(" ", msg);
+        errors.push(msg);
       }
-      return new Response(response, {
-        status: 500,
-        statusText: "Internal Server Error",
+      const printErrors = `for(let e of${JSON.stringify(errors)}){console.error(e)}`;
+
+      return new Response([hmrCall, printErrors], {
+        // status: 500,
+        // statusText: "Internal Server Error",
         headers: {
-          "Content-Type": "text/plain;charset=utf-8",
+          "Content-Type": "application/javascript;charset=utf-8",
         },
       });
     }
@@ -109,6 +170,10 @@ const handlers = {
     return new Response(file);
   },
 };
+
+function setToJson(set: Set<string>): string {
+  return JSON.stringify([...set.values()]);
+}
 
 const handlerMap: Map<string, HandlerFn> = new Map([
   ["text/html", handlers.html],

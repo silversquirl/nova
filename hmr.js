@@ -11,6 +11,7 @@
   });
   window.__hmr = async (extraChannels) => {
     await open;
+    // console.log("[hmr] subscribe ", extraChannels);
     sock.send(JSON.stringify(extraChannels));
   };
   open.then(() => console.log("[hmr] connected"));

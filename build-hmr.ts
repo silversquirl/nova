@@ -1,6 +1,6 @@
 import path from "path";
 
-export async function hmr(): Promise<string> {
+export async function buildHmr(): Promise<string> {
   const result = await Bun.build({
     entrypoints: [path.join(import.meta.dir, "hmr.js")],
     target: "browser",
